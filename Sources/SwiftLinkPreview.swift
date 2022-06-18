@@ -689,6 +689,9 @@ extension SwiftLinkPreview {
                     // image url is /path relative to base url
                     image = proto + "://" + canonicalUrl + image
                 }
+            } else if let location = image.range(of: "./"), location.lowerBound == image.startIndex {
+                // image url is ./path relative to base url
+                image = proto + "://" + canonicalUrl + "/" + image[location.upperBound..<image.endIndex]
             } else if !image.contains("://") {
                 // image is relative to request url
                 let requestUrl = removeSuffixIfNeeded(finalUrl)
