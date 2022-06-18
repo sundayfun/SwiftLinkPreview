@@ -28,6 +28,20 @@ open class Cancellable: NSObject {
     }
 }
 
+public struct CrawlOptions: OptionSet {
+    public let rawValue: Int
+    public init(rawValue: Int) {
+        self.rawValue = rawValue
+    }
+    
+    public static let skipTitle = CrawlOptions(rawValue: 1 << 0)
+    public static let skipDescription = CrawlOptions(rawValue: 1 << 1)
+    public static let skipImage = CrawlOptions(rawValue: 1 << 2)
+    public static let skipIcon = CrawlOptions(rawValue: 1 << 3)
+    public static let skipVideo = CrawlOptions(rawValue: 1 << 4)
+    public static let skipPrice = CrawlOptions(rawValue: 1 << 5)
+}
+
 open class SwiftLinkPreview: NSObject {
 
     // MARK: - Vars
@@ -82,7 +96,7 @@ open class SwiftLinkPreview: NSObject {
     // MARK: - Functions
     // Make preview
     //Swift-only preview function using Swift specific closure types
-    @nonobjc @discardableResult open func preview(_ text: String, onSuccess: @escaping (Response) -> Void, onError: @escaping (PreviewError) -> Void) -> Cancellable {
+    @nonobjc @discardableResult open func preview(_ text: String, options: CrawlOptions = [], onSuccess: @escaping (Response) -> Void, onError: @escaping (PreviewError) -> Void) -> Cancellable {
 
         let cancellable = Cancellable()
 
@@ -114,12 +128,12 @@ open class SwiftLinkPreview: NSObject {
             workQueue.async {
                 if cancellable.isCancelled {return}
 
-                if let result = self.cache.slp_getCachedResponse(url: url.absoluteString) {
+                if let result = self.cache.slp_getCachedResponse(url: url.absoluteString, options: options) {
                     successResponseQueue(result)
                 } else {
 
                     self.unshortenURL(url, cancellable: cancellable, completion: { unshortened in
-                        if let result = self.cache.slp_getCachedResponse(url: unshortened.absoluteString) {
+                        if let result = self.cache.slp_getCachedResponse(url: unshortened.absoluteString, options: options) {
                             successResponseQueue(result)
                         } else {
                             
@@ -128,7 +142,7 @@ open class SwiftLinkPreview: NSObject {
                             result.finalUrl = self.extractInURLRedirectionIfNeeded(unshortened)
                             result.canonicalUrl = self.extractCanonicalURL(unshortened)
 
-                            self.extractInfo(response: result, cancellable: cancellable, completion: {
+                            self.extractInfo(response: result, options: options, cancellable: cancellable, completion: {
 
                                 result.title = $0.title
                                 result.description = $0.description
@@ -138,8 +152,8 @@ open class SwiftLinkPreview: NSObject {
                                 result.video = $0.video
                                 result.price = $0.price
 
-                                self.cache.slp_setCachedResponse(url: unshortened.absoluteString, response: result)
-                                self.cache.slp_setCachedResponse(url: url.absoluteString, response: result)
+                                self.cache.slp_setCachedResponse(url: unshortened.absoluteString, options: options, response: result)
+                                self.cache.slp_setCachedResponse(url: url.absoluteString, options: options, response: result)
 
                                 successResponseQueue(result)
                             }, onError: errorResponseQueue)
@@ -344,7 +358,7 @@ extension SwiftLinkPreview {
     }
 
     // Extract HTML code and the information contained on it
-    fileprivate func extractInfo(response: Response, cancellable: Cancellable, completion: @escaping (Response) -> Void, onError: @escaping (PreviewError) -> Void) {
+    fileprivate func extractInfo(response: Response, options: CrawlOptions, cancellable: Cancellable, completion: @escaping (Response) -> Void, onError: @escaping (PreviewError) -> Void) {
 
         guard !cancellable.isCancelled, let url = response.finalUrl else { return }
 
@@ -393,7 +407,7 @@ extension SwiftLinkPreview {
                 let source = NSString( data: data, encoding:
                     CFStringConvertEncodingToNSStringEncoding( CFStringConvertIANACharSetNameToEncoding( encoding as CFString ) ) ) {
                 if !cancellable.isCancelled {
-                    self.parseHtmlString(source as String, response: response, completion: completion)
+                    self.parseHtmlString(source as String, response: response, options: options, completion: completion)
                 }
             } else {
                 do {
@@ -403,7 +417,7 @@ extension SwiftLinkPreview {
 
                     if let source = source {
                         if !cancellable.isCancelled {
-                            self.parseHtmlString(source as String, response: response, completion: completion)
+                            self.parseHtmlString(source as String, response: response, options: options, completion: completion)
                         }
                     } else {
                         onError(.cannotBeOpened(sourceUrl.absoluteString))
@@ -418,8 +432,8 @@ extension SwiftLinkPreview {
         }
     }
 
-    private func parseHtmlString(_ htmlString: String, response: Response, completion: @escaping (Response) -> Void) {
-        completion(self.performPageCrawling(self.cleanSource(htmlString), response: response))
+    private func parseHtmlString(_ htmlString: String, response: Response, options: CrawlOptions, completion: @escaping (Response) -> Void) {
+        completion(self.performPageCrawling(self.cleanSource(htmlString), response: response, options: options))
     }
 
     // Removing unnecessary data from the source
@@ -437,20 +451,33 @@ extension SwiftLinkPreview {
     }
 
     // Perform the page crawiling
-    private func performPageCrawling(_ htmlCode: String, response: Response) -> Response {
-        var result = self.crawIcon(htmlCode, result: response)
+    private func performPageCrawling(_ htmlCode: String, response: Response, options: CrawlOptions) -> Response {
+        var result = Response()
+        if !options.contains(.skipIcon) {
+            result = self.crawIcon(htmlCode, result: response)
+        }
 
         let sanitizedHtmlCode = htmlCode.deleteTagByPattern(Regex.linkPattern).extendedTrim
 
-        result = self.crawlMetaTags(sanitizedHtmlCode, result: result)
+        result = self.crawlMetaTags(sanitizedHtmlCode, result: result, options: options)
 
-        var otherResponse = self.crawlTitle(sanitizedHtmlCode, result: result)
+        var otherResponse = (htmlCode: sanitizedHtmlCode, result: result)
+        if !options.contains(.skipTitle) {
+            otherResponse = self.crawlTitle(sanitizedHtmlCode, result: result)
+        }
 
-        otherResponse = self.crawlDescription(otherResponse.htmlCode, result: otherResponse.result)
+        if !options.contains(.skipDescription) {
+            otherResponse = self.crawlDescription(otherResponse.htmlCode, result: otherResponse.result)
+        }
         
-        otherResponse = self.crawlPrice(otherResponse.htmlCode, result: otherResponse.result)
-
-        return self.crawlImages(otherResponse.htmlCode, result: otherResponse.result)
+        if !options.contains(.skipPrice) {
+            otherResponse = self.crawlPrice(otherResponse.htmlCode, result: otherResponse.result)
+        }
+        
+        if !options.contains(.skipPrice) {
+            otherResponse = (otherResponse.htmlCode, self.crawlImages(otherResponse.htmlCode, result: otherResponse.result))
+        }
+        return otherResponse.result
     }
 
     // Extract canonical URL
@@ -526,16 +553,24 @@ extension SwiftLinkPreview {
     }
 
     // Search for meta tags
-    internal func crawlMetaTags(_ htmlCode: String, result: Response) -> Response {
+    internal func crawlMetaTags(_ htmlCode: String, result: Response, options: CrawlOptions) -> Response {
 
         var result = result
-
-        let possibleTags: [String] = [
-            Response.Key.title.rawValue,
-            Response.Key.description.rawValue,
-            Response.Key.image.rawValue,
-            Response.Key.video.rawValue,
-        ]
+        var possibleTags: [String] = []
+        if !options.contains(.skipTitle) {
+            possibleTags.append(Response.Key.title.rawValue)
+        }
+        if !options.contains(.skipImage) {
+            possibleTags.append(Response.Key.image.rawValue)
+        }
+        if !options.contains(.skipDescription) {
+            possibleTags.append(Response.Key.description.rawValue)
+        }
+        if !options.contains(.skipVideo) {
+            possibleTags.append(Response.Key.video.rawValue)
+        }
+        
+        guard !possibleTags.isEmpty else { return result }
 
         let metatags = Regex.pregMatchAll(htmlCode, regex: Regex.metatagPattern, index: 1)
 
@@ -577,7 +612,7 @@ extension SwiftLinkPreview {
         var result = result
         let title = result.title
 
-        if title == nil || title?.isEmpty ?? true {
+        if title == nil || title?.isEmpty == true {
             if let value = Regex.pregMatchFirst(htmlCode, regex: Regex.titlePattern, index: 2) {
                 if value.isEmpty {
                     let fromBody: String = self.crawlCode(htmlCode, minimum: SwiftLinkPreview.titleMinimumRelevant)

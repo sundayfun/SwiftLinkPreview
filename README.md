@@ -134,6 +134,14 @@ Response {
 }
 ```
 
+If you don't need all properties, you can specify CrawlOptions when calling preview.
+```swift
+let preview = slp.preview("Text containing URL",
+                          options: [.skipImages, .skipVideo, .skipPrice],
+                          onSuccess: { result in print("\(result)") },
+                          onError: { error in print("\(error)")})
+```
+
 #### Cancelling a request
 ```swift
 let cancelablePreview = slp.preview(...,
@@ -167,9 +175,9 @@ If you want to create your own cache, just implement this protocol and use it on
 ```swift
 public protocol Cache {
 
-    func slp_getCachedResponse(url: String) -> SwiftLinkPreview.Response?
+    func slp_getCachedResponse(url: String, options: CrawlOptions) -> SwiftLinkPreview.Response?
 
-    func slp_setCachedResponse(url: String, response: SwiftLinkPreview.Response?)
+    func slp_setCachedResponse(url: String, options: CrawlOptions, response: SwiftLinkPreview.Response?)
 }
 ```
 

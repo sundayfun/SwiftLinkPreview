@@ -282,7 +282,7 @@ class ViewController: UIViewController {
         let textFieldText = textField?.text ?? String()
 
         if let url = self.slp.extractURL(text: textFieldText),
-            let cached = self.slp.cache.slp_getCachedResponse(url: url.absoluteString) {
+            let cached = self.slp.cache.slp_getCachedResponse(url: url.absoluteString, options: []) {
 
             self.result = cached
             self.setData()
@@ -292,6 +292,7 @@ class ViewController: UIViewController {
         } else {
             self.slp.preview(
                 textFieldText,
+//                options: [.skipDescription, .skipImage, .skipVideo, .skipPrice],
                 onSuccess: { result in
 
                     printResult(result)

@@ -10,18 +10,18 @@ import Foundation
 
 public protocol Cache {
 
-    func slp_getCachedResponse(url: String) -> Response?
+    func slp_getCachedResponse(url: String, options: CrawlOptions) -> Response?
 
-    func slp_setCachedResponse(url: String, response: Response?)
+    func slp_setCachedResponse(url: String, options: CrawlOptions, response: Response?)
 }
 
 public class DisabledCache: Cache {
 
     public static let instance = DisabledCache()
 
-    public func slp_getCachedResponse(url: String) -> Response? { return nil; }
+    public func slp_getCachedResponse(url: String, options: CrawlOptions) -> Response? { return nil; }
 
-    public func slp_setCachedResponse(url: String, response: Response?) { }
+    public func slp_setCachedResponse(url: String, options: CrawlOptions, response: Response?) { }
 }
 
 open class InMemoryCache: Cache {
@@ -45,35 +45,40 @@ open class InMemoryCache: Cache {
 
         self.cleanupTimer?.resume()
     }
+    
+    private func key(_ url: String, _ options: CrawlOptions) -> String {
+        "\(url) options:\(options.rawValue)"
+    }
 
     open func cleanup() {
         type(of: self).cacheQueue.async {
-            for (url, data) in self.cache {
+            for (key, data) in self.cache {
                 if data.date.timeIntervalSinceNow >= self.invalidationTimeout {
-                    self.cache[url] = nil
+                    self.cache[key] = nil
                 }
             }
         }
     }
 
-    open func slp_getCachedResponse(url: String) -> Response? {
+    open func slp_getCachedResponse(url: String, options: CrawlOptions) -> Response? {
         return type(of: self).cacheQueue.sync {
-            guard let response = cache[url] else { return nil }
+            guard let response = cache[key(url, options)] else { return nil }
 
             if response.date.timeIntervalSinceNow >= invalidationTimeout {
-                slp_setCachedResponse(url: url, response: nil)
+                slp_setCachedResponse(url: url, options: options, response: nil)
                 return nil
             }
             return response.response
         }
     }
 
-    open func slp_setCachedResponse(url: String, response: Response?) {
+    open func slp_setCachedResponse(url: String, options: CrawlOptions, response: Response?) {
         type(of: self).cacheQueue.sync {
+            let key = "\(url) options:\(options.rawValue)"
             if let response = response {
-                cache[url] = (response, Date())
+                cache[key] = (response, Date())
             } else {
-                cache[url] = nil
+                cache[key] = nil
             }
         }
     }
